@@ -80,9 +80,9 @@ void alias_add(char **argv);
 
 void alias_free(void);
 
-void rebulid_command(char ** argv);
+void rebulid_command(char **argv);
 
-void is_accessable(char **argv);
+int is_accessable(char **argv);
 
 void waitfg(pid_t pid);
 
@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
     /* Redirect stderr to stdout (so that driver will get all output
      * on the pipe connected to stdout) */
     dup2(1, 2);
-    at_exit(alias_free);  /* set the free when exit */
+    atexit(alias_free);  /* set the free when exit */
 
     /* Parse the command line */
     while ((c = getopt(argc, argv, "hvp")) != EOF) {
@@ -205,7 +205,7 @@ int main(int argc, char **argv) {
 int myStrchr(char *p, char ch) {
     int index = 0;
     int flag = 0;
-    while (ch != p[index] && p[index] != NULL) {
+    while (ch != p[index] && p[index] != '\0') {
         index++;
     }
     if (ch == p[index])
@@ -218,47 +218,59 @@ int myStrchr(char *p, char ch) {
  * initialize the environment of PATH
  */
 void init(void) {
-    char EnviromentPATH = "myconf";
-    char bashrcLine[MAXLINE], *buff, *delim;
+    char *EnviromentPATH = "myconf";
+    char bashrcLine[MAXLINE], *buf, *delim;
     int argc, index;
 
     memset(PATH, 0, sizeof(char) * MAXLINE * MAXARGS);
 
-    FIFE *file = fopen(EnviromentPATH, "r");
+    FILE *file = fopen(EnviromentPATH, "r");
     if (file == NULL)
-        fprintf(stdout, "Fail to initialize the environment PATH");
+        fprintf(stdout, "Fail to initialize the environment PATH!\n");
 
-
+    argc = 0;
     while (fgets(bashrcLine, MAXLINE, file)) {
         /* Find the key word PATH*/
-        buff = bashrcLine;
-        while (*buff && (*buff == ' ')) buff++;/* ignore leading spaces */
-        char *p = strpbrk(buff, "export");
+        buf = bashrcLine;
+        while (*buf && (*buf == ' ')) buf++;/* ignore leading spaces */
+        char *p = strstr(buf, "export");
         if (p != NULL) {
-            buff = p + 6;
-            while (*buff && (*buff == ' ')) buff++;
+            buf = p + 6;
+            while (*buf && (*buf == ' ')) buf++;
         }
 
-        if (buff[0] != 'P' || buff = strpbrk(buff, "PATH=") == NULL) continue;
+        if (buf[0] != 'P' || (buf = strstr(buf, "PATH=")) == NULL) continue;
 
         /* Fill the PATH array*/
-        buff = buff + 6;
+        buf = buf + 5;
         index = myStrchr(buf, ':');
-        argc = 0;
+
         while (index != -1) {
             if (index != 0)
-                strncpy(PATH[argc++], buff, index);
-            buff = buff + index + 1;
+                strncpy(PATH[argc++], buf, index);
+            buf = buf + index + 1;
             //while (*buf && (*buf == ' ')) /* ignore spaces */
             //	   buf++;
             index = myStrchr(buf, ':');
         }
+        if (*buf != '\0')
+            strncpy(PATH[argc++], buf, strlen(buf) - 1);
         //index = myStrchr(PATH[argc-1],'\"');
         //PATH[argc-1][index] = NULL;
     }
 
-    if (PATH[0][0] == NULL)
-        fprintf(stdout, "Fail to initialize the environment PATH");
+    /* test the PATH
+    int i = 0;
+    while (PATH[i][0] != '\0')
+    {
+        fprintf(stdout, "%s/:",PATH[i]);
+
+        i++;
+    }*/
+
+    if (PATH[0][0] == '\0')
+        fprintf(stdout, "Fail to initialize the environment PATH!\n");
+
 
     fflush(stdout);
 }
@@ -267,60 +279,70 @@ void init(void) {
 /*
 * use the alias list to rebulid the command
 */
-void rebulid_command(char **argv)
-{
-	alias_t p = alias_p;
-	int argc = 0;
-	while(argv[argc] !=NULL) argc++;
+void rebulid_command(char **argv) {
+    struct alias_t *p = alias_p;
+    int argc = 0;
+    char *delim;
+    static char array[MAXLINE];
+
+    while (argv[argc] != NULL) argc++;
     while (p != NULL) {
         if (!strcmp(p->new_command, argv[0])) {
-           /* Build the argv list */
-			static char buf[MAXLINE];
-			stpcpy(buf,p->old_command);
+            /* Build the argv list */
+            char *buf = array;
+            stpcpy(buf, p->old_command);
 
-			delim = strchr(buf, ' ');
-			argv[0] = buf;
-			*delim = '\0';
-			buf = delim + 1;
-			delim = strchr(buf, ' ');
-			while (delim) {
-				argv[argc++] = buf;
-				*delim = '\0';
-				buf = delim + 1;
-				while (*buf && (*buf == ' ')) /* ignore spaces */
-					buf++;
-				delim = strchr(buf, ' ');
-			}
-			argv[argc] = NULL;
+            buf[strlen(buf)] = ' ';
+
+            while (*buf && (*buf == ' ')) /* ignore leading spaces */
+                buf++;
+
+            delim = strchr(buf, ' ');
+            argv[0] = buf;
+            *delim = '\0';
+            buf = delim + 1;
+            while (*buf && (*buf == ' ')) /* ignore leading spaces */
+                buf++;
+            delim = strchr(buf, ' ');
+            while (delim) {
+                argv[argc++] = buf;
+                *delim = '\0';
+                buf = delim + 1;
+                while (*buf && (*buf == ' ')) /* ignore spaces */
+                    buf++;
+                delim = strchr(buf, ' ');
+            }
+            argv[argc] = NULL;
+
+            return ;
+
         } else
             p = p->next;
     }
-	return ;
+    return;
 }
 
 /*
 * if the file executable
 */
-int is_accessable(char **argv)
-{
-	if(access(argv[0],X_OK)!=-1)   
-		return 1; 
-	static char arg0[MAXLINE];
-	
-	for(int i=0; i<MAXARGS && PATH[i] != NULL; i++){
-		strcpy(arg0,PATH[i]);
-		int len = strlen(arg0);
-		arg0[len] = '/';
-		strcpy(&arg0[len+1],argv[0]);
-		if(access(argv0,X_OK)!=-1)
-		{
-			argv[0] = arg0;
-			return 1; 
-		}
-	}
-	
-	return 0;
-	
+int is_accessable(char **argv) {
+    if (access(argv[0], X_OK) != -1 && argv[0][0]=='.' && argv[0][1] == '/')
+        return 1;
+    static char argv0[MAXLINE];
+
+    for (int i = 0; i < MAXARGS && PATH[i][0] != '\0'; i++) {
+        strcpy(argv0, PATH[i]);
+        int len = strlen(argv0);
+        argv0[len] = '/';
+        strcpy(&argv0[len + 1], argv[0]);
+        if (access(argv0, X_OK) != -1) {
+            argv[0] = argv0;
+            return 1;
+        }
+    }
+
+    return 0;
+
 }
 
 
@@ -342,7 +364,7 @@ void eval(char *cmdline) {
     if (argv[0] == NULL) {
         return; /* Ignore empty lines */
     }
-	rebulid_command(argv);
+    rebulid_command(argv);
     if (!builtin_cmd(argv)) /* built-in command */
         /* program (file) */
     {
@@ -363,8 +385,8 @@ void eval(char *cmdline) {
             sigprocmask(SIG_UNBLOCK, &prev, NULL);
 
             if (!setpgid(0, 0)) {
-				if(execve(argv[0], argv, environ))
-					fprintf(stderr, "%s: Failed to execve\n", argv[0]);
+                if (execve(argv[0], argv, environ))
+                    fprintf(stderr, "%s: Failed to execve\n", argv[0]);
                 /* context changed */
             } else {
                 unix_error("Failed to invoke setpgid(0, 0)");
@@ -372,12 +394,18 @@ void eval(char *cmdline) {
         } else {
             /* Parent process */
             addjob(jobs, pid, (bg) ? BG : FG, cmdline);
+            //if(!bg)
+            //    sigaddset(&prev, SIGCHLD);
             sigprocmask(SIG_SETMASK, &prev, NULL);
             if (!bg) {
                 waitfg(pid);
+
             } else {
+
                 printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
             }
+            // sigprocmask(SIG_SETMASK, &prev, NULL);
+
         }
 
     }
@@ -468,34 +496,39 @@ void alias_add(char **argv) {
     struct alias_t *p;
     char *delim;
 
-    if (argv[4] != NULL) {
-        printf("Error command of alias");
+   /* if (argv[2] == NULL) {
+        if ((delim = strchr(argv[1], '=')) && delim[1] != '\'') {
+            fprintf(stderr, "Error command of alias\n");
+            return;
+        } else {
+
+            *delim = '\0';
+            delim += 2;
+            argv[3] = delim;
+            delim = strchr(argv[3], '\'');
+            *delim = '\0';
+
+        }
+    } else if (argv[3] == NULL) {
+        if (argv[2][0] != '=' && argv[2][1] != '\'') {
+            fprintf(stderr, "Error command of alias\n");
+            return;
+        } else {
+            delim = &argv[2][2];
+            argv[3] = delim;
+            delim = strchr(argv[3], '\'');
+            *delim = '\0';
+        }
+    }else*/ if (argv[4] != NULL) {
+        fprintf(stderr, "Error command of alias\n");
+        return;
+    }else if(argv[2][1] == '\'') {
+        fprintf(stderr, "Error command of alias\n");
         return;
     }
 
-    if (argv[3] == NULL && delim = strchr(argv[2], '=') && (delim + 1) != '\'') {
-        printf("Error command of alias");
-        return;
-    } else {
-        delim += 2;
-        argv[3] = delim;
-        delim = strchr(argv[3], '\'');
-        *delim = NULL;
-    }
 
-    if (argv[2] == NULL && delim = strchr(argv[1], '=') && (delim + 1) != '\'') {
-        printf("Error command of alias");
-        return;
-    } else {
-
-        *delim = NULL;
-        delim += 2;
-        argv[3] = delim;
-        delim = strchr(argv[3], '\'');
-        *delim = NULL;
-
-    }
-	p = alias_p;
+    p = alias_p;
     while (p != NULL) {
         if (!strcmp(p->new_command, argv[1])) {
 
@@ -506,7 +539,7 @@ void alias_add(char **argv) {
             p = p->next;
     }
 
-    p = (alias_t *) malloc(sizeof(struct alias_t));
+    p = (struct alias_t *) malloc(sizeof(struct alias_t));
 
     strcpy(p->new_command, argv[1]);
     strcpy(p->old_command, argv[3]);
@@ -522,8 +555,10 @@ void alias_add(char **argv) {
  */
 void alias_free(void) {
     while (alias_p != NULL) {
-        alias_t *p = alias_p->next;
-        free(p);
+        struct alias_t *p = alias_p->next;
+        free(alias_p);
+        alias_p = p;
+
     }
     return;
 }
@@ -582,8 +617,14 @@ void waitfg(pid_t pid) {
     if (pid == 0) {
         return;
     }
+
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTSTP);
+    sigaddset(&mask, SIGQUIT);
     while (pid == fgpid(jobs)) {
-        sleep(1);
+        sigsuspend(&mask);
     }
     return;
 
@@ -602,7 +643,8 @@ void waitfg(pid_t pid) {
  */
 void sigchld_handler(int sig) {
 
-    int olderrno = errno, status;
+    int status;
+    //   int test = ECHILD;
     pid_t pid;
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0) { //WNOHANG不打算阻塞等待子进程返回时，可以这样使用。
         // printf("1");
@@ -619,12 +661,12 @@ void sigchld_handler(int sig) {
                 job->state = ST;
             }
         }
-        if (errno != ECHILD) {
-            unix_error("waitpid error\n");
-        }
+    }
+    if (errno != ECHILD) {
+        unix_error("waitpid error");
     }
 
-    errno = olderrno;
+
     return;
 }
 
@@ -842,7 +884,7 @@ void usage(void) {
  * unix_error - unix-style error routine
  */
 void unix_error(char *msg) {
-    fprintf(stdout, "%s: %s\n", msg, strerror(errno));
+    fprintf(stdout, "%s : %s\n", msg, strerror(errno));
     exit(1);
 }
 
